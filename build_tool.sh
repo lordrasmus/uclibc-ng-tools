@@ -17,51 +17,92 @@ else
 fi
 
 
+print_status(){
+	 echo -e "\033[01;33m------------------------------  \033[01;32m $1 \033[01;33m ---------------------------------------\033[00m"
+}
 
-conf_kernel(){
-	if [ ! -e linux-6.1.60 ] ; then
-		wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.60.tar.xz
-		tar -xaf linux-6.1.60.tar.xz
+KERNEL_VERS=6.5.10
+
+prepare_kernel(){
+	if [ ! -e linux-$KERNEL_VERS.tar.xz ] ; then
+		print_status "download Kernel"
+		wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KERNEL_VERS.tar.xz -O linux-$KERNEL_VERS.tar.xz.dl
+		mv linux-$KERNEL_VERS.tar.xz.dl linux-$KERNEL_VERS.tar.xz
+	
 	fi
 	
-	make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX menuconfig
+	if [ ! -e linux-$KERNEL_VERS ] ; then
+		print_status "extract Kernel"
+		tar -xaf linux-$KERNEL_VERS.tar.xz
+	fi
+}
+
+conf_kernel(){
+	
+	prepare_kernel
+	
+	print_status "conf_kernel"
+	
+	make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX menuconfig
 }
 
 
 build_kernel(){
 
-	if [ ! -e linux-6.1.60 ] ; then
-		wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.60.tar.xz
-		tar -xaf linux-6.1.60.tar.xz
-	fi
+	prepare_kernel
 	
-	#make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX defconfig
+	print_status "build Kernel"
 	
-	make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX -j20
+	#make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX defconfig
+	
+	make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX -j20
 	
 	if [[ $CONFIG_KERNEL_ARCH == "arc" ]] ; then 
-		make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX uImage
+		make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX uImage
 	fi
 	
-	if [[ $CONFIG_KERNEL_ARCH == "sparc64" ]] ; then ${CONFIG_GCC_PREFIX}objcopy  -S linux-6.1.60/vmlinux kernel.img ; fi
+	if [[ $CONFIG_KERNEL_ARCH == "sparc64" ]] ; then ${CONFIG_GCC_PREFIX}objcopy  -S linux-$KERNEL_VERS/vmlinux kernel.img ; fi
 
 }
 
 para_kernel(){
-	if [ ! -e linux-6.1.60 ] ; then
-		wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.60.tar.xz
-		tar -xaf linux-6.1.60.tar.xz
-	fi
 	
+	prepare_kernel
 	
-	make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX $2
+	make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX $2
 }
 
 
 
 oldconf_kernel(){
+	
+	prepare_kernel
 
-	make -C linux-6.1.60 ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX oldconfig
+	make -C linux-$KERNEL_VERS ARCH=$CONFIG_KERNEL_ARCH CROSS_COMPILE=$CONFIG_GCC_PREFIX oldconfig
+}
+
+
+upload_kernel(){
+	
+	print_status "upload_kernel"
+	
+	if [ ! -e uclibc-ng-qemu-imgs ] ; then
+		git clone git@github.com:lordrasmus/uclibc-ng-qemu-imgs.git
+	fi
+	
+	if [ $# -ne 2 ] ; then
+		echo "kernel name angeben"
+		exit 1
+	fi
+	
+	echo "Kernel Name : $2"
+	
+	cp linux-$KERNEL_VERS/arch/$CONFIG_KERNEL_ARCH/boot/bzImage uclibc-ng-qemu-imgs/$2.img
+	cp linux-$KERNEL_VERS/.config uclibc-ng-qemu-imgs/$2.config
+	
+	( cd uclibc-ng-qemu-imgs; git status )
+	
+	
 }
 
 
@@ -76,6 +117,8 @@ fill_sysroot(){
 
 build_rootfs(){
 
+	print_status "build_rootfs"
+	
 	rm -rf rootfs
 	mkdir rootfs
 	mkdir -p rootfs/usr/lib/
@@ -159,15 +202,30 @@ build_rootfs(){
 	echo "::sysinit:/bin/mount -t devtmpfs none /dev" >  rootfs/etc/inittab
 	echo "::sysinit:/bin/mount -t proc none /proc" >> rootfs/etc/inittab
 	echo "::sysinit:/bin/mount -t sysfs none /sys" >> rootfs/etc/inittab
+	echo "::sysinit:/bin/dmesg -n1" >>  rootfs/etc/inittab
+	echo "::sysinit:/bin/echo 'test console' > /dev/console" >> rootfs/etc/inittab
+	echo "::sysinit:/bin/echo 'test ttyS0' > /dev/ttyS0" >> rootfs/etc/inittab
+	#echo "::sysinit:/bin/echo 'test ttyS1' > /dev/ttyS1" >> rootfs/etc/inittab
+	#echo "::sysinit:/bin/echo 'test ttyS2' > /dev/ttyS2" >> rootfs/etc/inittab
+	#echo "::sysinit:/bin/echo 'test ttyS3' > /dev/ttyS3" >> rootfs/etc/inittab
+	echo "console::sysinit:/bin/run_tests.sh" >> rootfs/etc/inittab
 	echo "console::respawn:/bin/sh" >> rootfs/etc/inittab
 	echo "08:00:20:00:61:CA  pal" > rootfs/etc/ethers
 	echo "08:00:20:00:61:CB  192.168.11.2" >> rootfs/etc/ethers
 	echo "08:00:20:00:61:CC  teeth" >> rootfs/etc/ethers
 	echo "root:x:0:" > rootfs/etc/group
 	echo "root:x:0:0:root:/root:/bin/sh" > rootfs/etc/passwd
+	
+	echo "#!/bin/sh"                                                           >  rootfs/bin/run_tests.sh
+	echo "cd /usr/lib/uclibc-ng-test/test/"                                    >> rootfs/bin/run_tests.sh
+	echo "echo '-------------------- tests_start ------------------------'"    >> rootfs/bin/run_tests.sh
+	echo "sh uclibcng-testrunner.sh"                                           >> rootfs/bin/run_tests.sh
+	echo "echo '-------------------- tests_end --------------------------'"    >> rootfs/bin/run_tests.sh
+	chmod 777 rootfs/bin/run_tests.sh
+          
 	( cd rootfs ; find . | sort | cpio -o -H newc ) > rootfs.img
 	rm -f rootfs.img.xz
-	xz --check=crc32 rootfs.img
+	xz -k --check=crc32 rootfs.img
 }
 
 json=$(cat infos.json)
@@ -196,6 +254,8 @@ if [[ $1 == "build_kernel" ]] ;  then build_kernel   ; exit 0 ; fi
 if [[ $1 == "conf_kernel" ]]  ;  then conf_kernel    ; exit 0 ; fi
 if [[ $1 == "para_kernel" ]]  ;  then para_kernel  $@  ; exit 0 ; fi
 if [[ $1 == "oldconf_kernel" ]]; then oldconf_kernel ; exit 0 ; fi
+
+if [[ $1 == "upload_kernel" ]]; then upload_kernel $@ ; exit 0 ; fi
 
 if [[ $1 == "build_rootfs" ]] ; then 
 	fill_sysroot 
