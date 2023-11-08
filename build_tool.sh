@@ -16,12 +16,24 @@ else
 	exit 1
 fi
 
+json=$(cat infos.json)
+for key in $(echo "$json" | jq -r 'keys[]'); do
+	value=$(echo "$json" | jq -r ".$key")
+        echo "$key=$value" 
+	export $key="$value"
+done
+
+
+
+KERNEL_VERS=6.5.10
+if [[ $CONFIG_KERNEL_ARCH == "cris" ]] ; then
+	KERNEL_VERS=4.9.156
+fi
+
 
 print_status(){
 	 echo -e "\033[01;33m------------------------------  \033[01;32m $1 \033[01;33m ---------------------------------------\033[00m"
 }
-
-KERNEL_VERS=6.5.10
 
 prepare_kernel(){
 	if [ ! -e linux-$KERNEL_VERS.tar.xz ] ; then
@@ -62,6 +74,8 @@ build_kernel(){
 	fi
 	
 	if [[ $CONFIG_KERNEL_ARCH == "sparc64" ]] ; then ${CONFIG_GCC_PREFIX}objcopy  -S linux-$KERNEL_VERS/vmlinux kernel.img ; fi
+	
+	if [[ $CONFIG_KERNEL_ARCH == "powerpc" ]] ; then ${CONFIG_GCC_PREFIX}objcopy  -S linux-$KERNEL_VERS/vmlinux kernel.img ; fi
 
 }
 
@@ -228,12 +242,7 @@ build_rootfs(){
 	xz -k --check=crc32 rootfs.img
 }
 
-json=$(cat infos.json)
-for key in $(echo "$json" | jq -r 'keys[]'); do
-	value=$(echo "$json" | jq -r ".$key")
-        echo "$key=$value" 
-	export $key="$value"
-done
+
 
 
 export PATH=$PATH:$(pwd)/$CONFIG_TOOLCHAIN/usr/bin
